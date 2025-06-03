@@ -20,6 +20,11 @@ class Color:
     GRAY = (128, 128, 128)
     DARK_GREEN = (100, 200, 100)
     YELLOW = (255, 255, 0)
+    GRASS_GREEN = (34, 139, 34)
+    BROWN = (139, 69, 19)
+    FLOWER_RED = (220, 20, 60)
+    FLOWER_PINK = (255, 182, 193)
+    PURPLE = (128, 0, 128)
 
 class GameState(Enum):
     MENU = "menu"
@@ -179,11 +184,95 @@ class Food:
         y = random.randint(0, self.config.cell_number_y - 1)
         self.pos = pygame.Vector2(x, y)
 
+class GardenBackground:
+    def __init__(self, config: GameConfig) -> None:
+        self.config = config
+        self.flowers = []
+        self.generate_flowers()
+    
+    def generate_flowers(self) -> None:
+        for _ in range(15):
+            x = random.randint(0, self.config.cell_number_x - 1)
+            y = random.randint(0, self.config.cell_number_y - 1)
+            flower_type = random.choice(['red', 'pink'])
+            self.flowers.append({'pos': pygame.Vector2(x, y), 'type': flower_type})
+    
+    def draw_background(self, screen: pygame.Surface) -> None:
+        screen.fill(Color.GRASS_GREEN)
+        
+        for x in range(0, self.config.window_width, self.config.cell_size * 4):
+            for y in range(0, self.config.window_height, self.config.cell_size * 4):
+                if random.random() < 0.3:
+                    grass_rect = pygame.Rect(x, y, self.config.cell_size // 2, self.config.cell_size // 2)
+                    pygame.draw.rect(screen, Color.DARK_GREEN, grass_rect)
+        
+        for flower in self.flowers:
+            x_pos = int(flower['pos'].x * self.config.cell_size)
+            y_pos = int(flower['pos'].y * self.config.cell_size)
+            
+            flower_color = Color.FLOWER_RED if flower['type'] == 'red' else Color.FLOWER_PINK
+            center = (x_pos + self.config.cell_size // 2, y_pos + self.config.cell_size // 2)
+            pygame.draw.circle(screen, flower_color, center, self.config.cell_size // 4)
+            pygame.draw.circle(screen, Color.YELLOW, center, self.config.cell_size // 8)
+
+class Enemy:
+    def __init__(self, config: GameConfig) -> None:
+        self.config = config
+        self.pos: pygame.Vector2 = pygame.Vector2(0, 0)
+        self.direction: pygame.Vector2 = pygame.Vector2(0, 0)
+        self.speed = 0.5
+        self.randomize_position()
+        self.randomize_direction()
+        self.move_timer = 0
+        self.move_interval = 60
+    
+    def randomize_position(self) -> None:
+        x = random.randint(0, self.config.cell_number_x - 1)
+        y = random.randint(0, self.config.cell_number_y - 1)
+        self.pos = pygame.Vector2(x, y)
+    
+    def randomize_direction(self) -> None:
+        directions = [
+            pygame.Vector2(0, -1),  # UP
+            pygame.Vector2(0, 1),   # DOWN
+            pygame.Vector2(-1, 0),  # LEFT
+            pygame.Vector2(1, 0)    # RIGHT
+        ]
+        self.direction = random.choice(directions)
+    
+    def update(self) -> None:
+        self.move_timer += 1
+        if self.move_timer >= self.move_interval:
+            self.move_timer = 0
+            new_pos = self.pos + self.direction
+            
+            if (0 <= new_pos.x < self.config.cell_number_x and 
+                0 <= new_pos.y < self.config.cell_number_y):
+                self.pos = new_pos
+            else:
+                self.randomize_direction()
+            
+            if random.random() < 0.3:
+                self.randomize_direction()
+    
+    def draw(self, screen: pygame.Surface) -> None:
+        x_pos = int(self.pos.x * self.config.cell_size)
+        y_pos = int(self.pos.y * self.config.cell_size)
+        enemy_rect = pygame.Rect(x_pos, y_pos, self.config.cell_size, self.config.cell_size)
+        pygame.draw.rect(screen, Color.PURPLE, enemy_rect)
+        pygame.draw.rect(screen, Color.WHITE, enemy_rect, 2)
+        
+        center = (x_pos + self.config.cell_size // 2, y_pos + self.config.cell_size // 2)
+        pygame.draw.circle(screen, Color.RED, (center[0] - 3, center[1] - 3), 2)
+        pygame.draw.circle(screen, Color.RED, (center[0] + 3, center[1] - 3), 2)
+
 class Game:
     def __init__(self, config: GameConfig) -> None:
         self.config = config
         self.snake = Snake(config)
         self.food = Food(config)
+        self.garden = GardenBackground(config)
+        self.enemies = [Enemy(config) for _ in range(3)]
         self.score = 0
         self.state = GameState.MENU
         self.high_score_manager = HighScoreManager(config)
@@ -193,13 +282,19 @@ class Game:
     def update(self) -> None:
         if self.state == GameState.PLAYING:
             self.snake.move_snake()
+            for enemy in self.enemies:
+                enemy.update()
             self.check_collision()
+            self.check_enemy_collision()
             self.check_fail()
     
     def draw_elements(self, screen: pygame.Surface) -> None:
         if self.state == GameState.PLAYING or self.state == GameState.PAUSED:
+            self.garden.draw_background(screen)
             self.food.draw_food(screen)
             self.snake.draw_snake(screen)
+            for enemy in self.enemies:
+                enemy.draw(screen)
             self.draw_score(screen)
             
             if self.state == GameState.PAUSED:
@@ -264,6 +359,11 @@ class Game:
                 if block == self.food.pos:
                     self.food.randomize()
     
+    def check_enemy_collision(self) -> None:
+        for enemy in self.enemies:
+            if enemy.pos == self.snake.body[0]:
+                self.game_over()
+    
     def check_fail(self) -> None:
         if self.snake.check_collision():
             self.game_over()
@@ -275,6 +375,8 @@ class Game:
     def restart_game(self) -> None:
         self.snake = Snake(self.config)
         self.food = Food(self.config)
+        self.garden = GardenBackground(self.config)
+        self.enemies = [Enemy(self.config) for _ in range(3)]
         self.score = 0
         self.state = GameState.PLAYING
     
@@ -334,7 +436,8 @@ def main() -> None:
                     elif event.key == pygame.K_ESCAPE:
                         game.state = GameState.MENU
         
-        screen.fill(Color.BLACK)
+        if game.state == GameState.MENU or game.state == GameState.GAME_OVER:
+            screen.fill(Color.BLACK)
         game.draw_elements(screen)
         pygame.display.update()
         clock.tick(60)
