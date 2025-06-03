@@ -5,7 +5,7 @@ import random
 import sys
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Tuple, Optional
+from typing import List, Optional
 import json
 import os
 
@@ -25,6 +25,8 @@ class Color:
     FLOWER_RED = (220, 20, 60)
     FLOWER_PINK = (255, 182, 193)
     PURPLE = (128, 0, 128)
+    COCONUT_BROWN = (101, 67, 33)
+    COCONUT_FIBER = (160, 130, 98)
     
     # Rainbow colors for the snake
     RAINBOW_COLORS = [
@@ -55,6 +57,10 @@ class GameConfig:
     window_height: int = 600
     cell_size: int = 20
     snake_speed: int = 150
+    min_snake_speed: int = 80
+    max_snake_speed: int = 300
+    speed_increase: int = 20
+    coconut_spawn_chance: float = 0.15
     high_score_file: str = "high_scores.json"
     
     @property
@@ -106,6 +112,7 @@ class Snake:
         ]
         self.direction: pygame.Vector2 = Direction.RIGHT.value
         self.new_block: bool = False
+        self.should_remove_block: bool = False
         
     def draw_snake(self, screen: pygame.Surface) -> None:
         for i, block in enumerate(self.body):
@@ -128,13 +135,30 @@ class Snake:
             body_copy.insert(0, body_copy[0] + self.direction)
             self.body = body_copy[:]
             self.new_block = False
-        else:
-            body_copy = self.body[:-1]
-            body_copy.insert(0, body_copy[0] + self.direction)
+        elif self.should_remove_block and len(self.body) > 1:
+            # Remove one segment but ensure we don't go below 1 segment
+            if len(self.body) > 2:
+                body_copy = self.body[:-2]  # Remove 2 segments (tail + one more)
+            else:
+                body_copy = []  # Will become 1 segment after adding new head
+            body_copy.insert(0, self.body[0] + self.direction)
             self.body = body_copy[:]
+            self.should_remove_block = False
+        else:
+            if len(self.body) > 1:
+                body_copy = self.body[:-1]
+                body_copy.insert(0, body_copy[0] + self.direction)
+                self.body = body_copy[:]
+            else:
+                # Single segment case
+                self.body = [self.body[0] + self.direction]
     
     def add_block(self) -> None:
         self.new_block = True
+    
+    def remove_block(self) -> None:
+        if len(self.body) > 1:
+            self.should_remove_block = True
     
     def check_collision(self) -> bool:
         head = self.body[0]
@@ -191,6 +215,38 @@ class Food:
             (center_x + 4, y_pos + 5)
         ]
         pygame.draw.polygon(screen, Color.GREEN, leaf_points)
+    
+    def randomize(self) -> None:
+        x = random.randint(0, self.config.cell_number_x - 1)
+        y = random.randint(0, self.config.cell_number_y - 1)
+        self.pos = pygame.Vector2(x, y)
+
+class Coconut:
+    def __init__(self, config: GameConfig) -> None:
+        self.config = config
+        self.pos: pygame.Vector2 = pygame.Vector2(0, 0)
+        self.randomize()
+    
+    def draw_coconut(self, screen: pygame.Surface) -> None:
+        x_pos = int(self.pos.x * self.config.cell_size)
+        y_pos = int(self.pos.y * self.config.cell_size)
+        center_x = x_pos + self.config.cell_size // 2
+        center_y = y_pos + self.config.cell_size // 2
+        
+        # Draw coconut body (brown oval)
+        coconut_rect = pygame.Rect(x_pos + 2, y_pos + 1, self.config.cell_size - 4, self.config.cell_size - 2)
+        pygame.draw.ellipse(screen, Color.COCONUT_BROWN, coconut_rect)
+        
+        # Draw coconut fiber texture (lighter brown lines)
+        for i in range(3):
+            line_y = y_pos + 4 + i * 4
+            pygame.draw.line(screen, Color.COCONUT_FIBER, (x_pos + 3, line_y), (x_pos + self.config.cell_size - 3, line_y), 1)
+        
+        # Draw coconut eyes (3 dark spots)
+        eye_radius = 2
+        pygame.draw.circle(screen, Color.BLACK, (center_x - 4, center_y - 2), eye_radius)
+        pygame.draw.circle(screen, Color.BLACK, (center_x + 4, center_y - 2), eye_radius)
+        pygame.draw.circle(screen, Color.BLACK, (center_x, center_y + 3), eye_radius)
     
     def randomize(self) -> None:
         x = random.randint(0, self.config.cell_number_x - 1)
@@ -284,6 +340,7 @@ class Game:
         self.config = config
         self.snake = Snake(config)
         self.food = Food(config)
+        self.coconut: Optional[Coconut] = None
         self.garden = GardenBackground(config)
         self.enemies = [Enemy(config) for _ in range(3)]
         self.score = 0
@@ -291,6 +348,7 @@ class Game:
         self.high_score_manager = HighScoreManager(config)
         self.font = pygame.font.Font(None, 36)
         self.large_font = pygame.font.Font(None, 72)
+        self.current_speed = config.snake_speed
         
     def update(self) -> None:
         if self.state == GameState.PLAYING:
@@ -305,6 +363,8 @@ class Game:
         if self.state == GameState.PLAYING or self.state == GameState.PAUSED:
             self.garden.draw_background(screen)
             self.food.draw_food(screen)
+            if self.coconut:
+                self.coconut.draw_coconut(screen)
             self.snake.draw_snake(screen)
             for enemy in self.enemies:
                 enemy.draw(screen)
@@ -362,15 +422,29 @@ class Game:
         screen.blit(restart_text, restart_rect)
     
     def check_collision(self) -> None:
+        # Check apple collision
         if self.food.pos == self.snake.body[0]:
             self.food.randomize()
             self.snake.add_block()
             self.score += 1
             
+            # Spawn coconut occasionally
+            if random.random() < self.config.coconut_spawn_chance and not self.coconut:
+                self.coconut = Coconut(self.config)
+                self.ensure_coconut_not_on_snake()
+            
             # Ensure food doesn't spawn on snake
             for block in self.snake.body[1:]:
                 if block == self.food.pos:
                     self.food.randomize()
+        
+        # Check coconut collision
+        if self.coconut and self.coconut.pos == self.snake.body[0]:
+            # Remove snake segment and increase speed
+            self.snake.remove_block()
+            self.increase_speed()
+            self.coconut = None
+            self.score += 2  # Bonus points for coconut
     
     def check_enemy_collision(self) -> None:
         for enemy in self.enemies:
@@ -388,9 +462,11 @@ class Game:
     def restart_game(self) -> None:
         self.snake = Snake(self.config)
         self.food = Food(self.config)
+        self.coconut = None
         self.garden = GardenBackground(self.config)
         self.enemies = [Enemy(self.config) for _ in range(3)]
         self.score = 0
+        self.current_speed = self.config.snake_speed
         self.state = GameState.PLAYING
     
     def draw_score(self, screen: pygame.Surface) -> None:
@@ -399,6 +475,27 @@ class Game:
         
         high_score_text = self.font.render(f"High: {self.high_score_manager.get_high_score()}", True, Color.YELLOW)
         screen.blit(high_score_text, (10, 50))
+        
+        # Show current speed
+        speed_text = self.font.render(f"Speed: {self.current_speed}", True, Color.BLUE)
+        screen.blit(speed_text, (10, 90))
+        
+        # Show coconut indicator
+        if self.coconut:
+            coconut_text = self.font.render("🥥 Coconut Available!", True, Color.COCONUT_BROWN)
+            screen.blit(coconut_text, (10, 130))
+
+    def increase_speed(self) -> None:
+        self.current_speed = max(self.config.min_snake_speed, self.current_speed - self.config.speed_increase)
+        # Update the game timer with new speed
+        pygame.time.set_timer(pygame.USEREVENT, self.current_speed)
+    
+    def ensure_coconut_not_on_snake(self) -> None:
+        if not self.coconut:
+            return
+        
+        while any(block == self.coconut.pos for block in self.snake.body):
+            self.coconut.randomize()
 
 def main() -> None:
     config = GameConfig()
@@ -409,7 +506,7 @@ def main() -> None:
     game = Game(config)
     
     SCREEN_UPDATE = pygame.USEREVENT
-    pygame.time.set_timer(SCREEN_UPDATE, config.snake_speed)
+    pygame.time.set_timer(SCREEN_UPDATE, game.current_speed)
     
     while True:
         for event in pygame.event.get():
