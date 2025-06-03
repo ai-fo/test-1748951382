@@ -155,9 +155,24 @@ class Food:
     def draw_food(self, screen: pygame.Surface) -> None:
         x_pos = int(self.pos.x * self.config.cell_size)
         y_pos = int(self.pos.y * self.config.cell_size)
-        food_rect = pygame.Rect(x_pos, y_pos, self.config.cell_size, self.config.cell_size)
-        pygame.draw.rect(screen, Color.RED, food_rect)
-        pygame.draw.rect(screen, Color.WHITE, food_rect, 1)
+        center_x = x_pos + self.config.cell_size // 2
+        center_y = y_pos + self.config.cell_size // 2
+        radius = self.config.cell_size // 3
+        
+        # Draw apple body
+        pygame.draw.circle(screen, Color.RED, (center_x, center_y), radius)
+        
+        # Draw apple stem
+        stem_rect = pygame.Rect(center_x - 1, y_pos + 2, 2, 4)
+        pygame.draw.rect(screen, (139, 69, 19), stem_rect)
+        
+        # Draw apple leaf
+        leaf_points = [
+            (center_x + 2, y_pos + 3),
+            (center_x + 5, y_pos + 1),
+            (center_x + 4, y_pos + 5)
+        ]
+        pygame.draw.polygon(screen, Color.GREEN, leaf_points)
     
     def randomize(self) -> None:
         x = random.randint(0, self.config.cell_number_x - 1)
