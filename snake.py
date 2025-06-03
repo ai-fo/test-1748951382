@@ -25,6 +25,17 @@ class Color:
     FLOWER_RED = (220, 20, 60)
     FLOWER_PINK = (255, 182, 193)
     PURPLE = (128, 0, 128)
+    
+    # Rainbow colors for the snake
+    RAINBOW_COLORS = [
+        (255, 0, 0),    # Red
+        (255, 127, 0),  # Orange
+        (255, 255, 0),  # Yellow
+        (0, 255, 0),    # Green
+        (0, 0, 255),    # Blue
+        (75, 0, 130),   # Indigo
+        (148, 0, 211)   # Violet
+    ]
 
 class GameState(Enum):
     MENU = "menu"
@@ -104,8 +115,10 @@ class Snake:
             
             if i == 0:  # Head
                 pygame.draw.rect(screen, Color.YELLOW, block_rect)
-            else:  # Body
-                pygame.draw.rect(screen, Color.DARK_GREEN, block_rect)
+            else:  # Body - rainbow effect
+                color_index = (i - 1) % len(Color.RAINBOW_COLORS)
+                rainbow_color = Color.RAINBOW_COLORS[color_index]
+                pygame.draw.rect(screen, rainbow_color, block_rect)
             
             pygame.draw.rect(screen, Color.WHITE, block_rect, 1)
     
